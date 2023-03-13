@@ -17,6 +17,24 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.image as mpimg
 
+import torchvision
+from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+
+import json
+
+chinese_to_index_map = {}
+index_to_chinese_map = {}
+ind = 0
+
+def chinese_to_index(a):
+    global ind
+    if (a in chinese_to_index_map):
+        return chinese_to_index_map[a]
+    else:
+        index_to_chinese_map[ind] = a
+        chinese_to_index_map[a] = ind
+        ind += 1
+        return chinese_to_index_map[a]
 class OCRNetwork(Module):
     def __init__(self, input_size, output_size):
         super(OCRNetwork, self).__init__()
@@ -31,7 +49,7 @@ class OCRNetwork(Module):
         self.relu2 = ReLU()
         self.maxpool2 = MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 		# initialize first (and only) set of FC => RELU layers
-        self.fc1 = Linear(in_features=781250, out_features=500)
+        self.fc1 = Linear(in_features=42050, out_features=500)
         self.relu3 = ReLU()
 		# initialize our softmax classifier
         self.fc2 = Linear(in_features=500, out_features=output_size)
@@ -61,12 +79,66 @@ class OCRNetwork(Module):
         return output
 
 def main():
-    img = mpimg.imread('../data/ctw-test-01-of-07/0000001.jpg')
-    fig, ax = plt.subplots()
-    ax.imshow(img)
-    rect = patches.Rectangle((1492.8684112354124, 1020.9181839073769), 23.764909585513124, 32.58313861351917, linewidth=1, edgecolor='r', facecolor='none')
-    ax.add_patch(rect)
-    plt.show()
+    f = open("../data/train.jsonl")
+    for line in (f.readlines()):
+        anno = json.loads(line)
+        annotations = anno["annotations"]
+
+        for anno_group in annotations:
+            for annotation in anno_group:
+                chinese_to_index(annotation["text"])
+
+    print(len(chinese_to_index_map))
+
+    model = OCRNetwork(input_size = 1, output_size = 3696)
+    dataset = load_dataset()
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
+
+    opt = Adam(model.parameters(), lr=0.005)
+
+    num_epochs = 10
+    accuracy = 0
+    epochs = 0
+    accuracy_arr = []
+    loss_arr = []
+    for _ in range(num_epochs):
+        total_loss = 0
+        correct = 0
+        total_y = 0
+        
+        for train_x, train_y in dataloader:
+            # print(train_x.shape)
+            # print(train_y)
+            # print(index_to_chinese_map[train_y[0].item()])
+            # plt.imshow(train_x[0].reshape((128, 128)))
+            # plt.show()
+            train_x = train_x[0]
+            train_y = train_y[0]
+            pred = model(train_x)
+            loss = cross_entropy(pred, train_y)
+            total_loss += loss.item()
+            correct += torch.sum(torch.argmax(pred, dim=1) == train_y).item()
+            total_y += len(train_y)
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        
+        epochs += 1
+        accuracy = correct/total_y
+        print("accuracy: " + str(accuracy))
+        accuracy_arr.append(accuracy)
+        loss_arr.append(total_loss/len(dataloader))
+    
+    print(accuracy_arr)
+    print(loss_arr)
+
+    # img = mpimg.imread('../data/ctw-test-01-of-07/0000001.jpg')
+    # fig, ax = plt.subplots()
+    # ax.imshow(img)
+    # rect = patches.Rectangle((1492.8684112354124, 1020.9181839073769), 23.764909585513124, 32.58313861351917, linewidth=1, edgecolor='r', facecolor='none')
+    # ax.add_patch(rect)
+    # plt.show()
     # dataset = load_dataset()
     # dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 
